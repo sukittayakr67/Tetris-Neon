@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Tetris</title>
+    <!-- เรียกใช้ Tailwind CSS เพื่อช่วยในการจัด Layout ได้อย่างรวดเร็ว -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        body {
+            background-color: #0f172a; /* พื้นหลังสีเข้มสไตล์ Dark theme */
+            color: #e2e8f0;
+            font-family: 'Orbitron', sans-serif; /* ฟอนต์สไตล์ไซไฟ/นีออน */
+            overflow: hidden; /* ป้องกันการเลื่อนหน้าจอเมื่อกดลูกศร */
+        }
+
+        /* ตกแต่ง Canvas ให้มีขอบเรืองแสง */
+        canvas {
+            background-color: rgba(0, 0, 0, 0.6);
+            border: 2px solid #334155;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(51, 65, 85, 0.5);
+        }
+
+        #game-board {
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+            border-color: #0284c7;
+        }
+
+        /* ตกแต่งปุ่มให้ดูเป็นปุ่มนีออน */
+        .neon-button {
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .neon-button:hover {
+            box-shadow: 0 0 15px currentColor;
+            transform: scale(1.05);
+        }
+
+        /* เลเยอร์แสดง Game Over ทับกระดาน */
+        #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 8px;
+            z-index: 10;
+        }
+
+        .neon-text {
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        /* อนิเมชันสำหรับบล็อกลอยในหน้าแรก */
+        @keyframes float-up {
+            0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(-120vh) rotate(360deg); opacity: 0; }
+        }
+
+        .floating-shape {
+            animation-name: float-up;
+            animation-timing-function: linear;
+            animation-iteration-count: infinite;
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        /* เพิ่มลวดลายตารางเรืองแสงสไตล์ Cyberpunk สำหรับหน้าแรก */
+        .cyber-grid {
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            bottom: -30%;
+            left: -50%;
+            background-image: 
+                linear-gradient(rgba(34, 211, 238, 0.2) 2px, transparent 2px),
+                linear-gradient(90deg, rgba(34, 211, 238, 0.2) 2px, transparent 2px);
+            background-size: 50px 50px;
+            transform: perspective(600px) rotateX(75deg);
+            transform-origin: center center;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* เอฟเฟกต์เส้นทีวีเรโทรกระพริบเบาๆ */
+        .scanlines {
+            position.absolute;
+            inset: 0;
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.15));
+            background-size: 100% 4px;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* เอฟเฟกต์ลวดลายพัลส์เรืองแสงสำหรับพื้นหลังเกม */
+        @keyframes bg-pulse {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.08); }
+        }
+
+        .bg-glow-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            animation: bg-pulse 8s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 2;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex items-center justify-center relative overflow-hidden bg-slate-950">
+
+    <!-- Canvas พื้นหลังอนิเมชันอนุภาคเรืองแสงเคลื่อนไหว (Particle Background) -->
+    <canvas id="bg-canvas" class="absolute inset-0 w-full h-full z-0 pointer-events-none" style="border: none; box-shadow: none; background: transparent;"></canvas>
+
+    <!-- เอฟเฟกต์วงแสงเรืองแสงฉากหลัง -->
+    <div class="bg-glow-orb w-[500px] h-[500px] bg-cyan-600/20 top-[-100px] left-[-100px]"></div>
+    <div class="bg-glow-orb w-[600px] h-[600px] bg-purple-600/20 bottom-[-150px] right-[-150px]" style="animation-delay: -4s;"></div>
+
+    <!-- หน้าจอเริ่มเกม (Landing Page) -->
+    <div id="start-screen" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0f172a] overflow-hidden w-full h-full">
+        
+        <!-- ลวดลายตกแต่งพื้นหลังล้ำสมัย -->
+        <div class="absolute inset-0 bg-gradient-to-b from-[#0f172a] via-[#1e1b4b] to-[#0f172a] z-0"></div>
+        <div class="cyber-grid"></div>
+        <div class="scanlines"></div>
+
+        <!-- เอฟเฟกต์ตกแต่งพื้นหลัง (บล็อกลอย) -->
+        <div class="absolute inset-0 z-0 opacity-60 pointer-events-none">
+            <div class="floating-shape absolute bottom-[-100px] border-2 border-cyan-400 shadow-[0_0_15px_#22d3ee] w-12 h-12" style="left: 10%; animation-duration: 12s;"></div>
+            <div class="floating-shape absolute bottom-[-100px] border-2 border-purple-500 shadow-[0_0_15px_#a855f7] w-16 h-16" style="left: 30%; animation-duration: 9s; animation-delay: 2s;"></div>
+            <div class="floating-shape absolute bottom-[-100px] border-2 border-yellow-400 shadow-[0_0_15px_#facc15] w-10 h-10" style="left: 60%; animation-duration: 15s; animation-delay: 1s;"></div>
+            <div class="floating-shape absolute bottom-[-100px] border-2 border-green-500 shadow-[0_0_15px_#22c55e] w-20 h-20" style="left: 80%; animation-duration: 10s; animation-delay: 3s;"></div>
+            <div class="floating-shape absolute bottom-[-100px] border-2 border-red-500 shadow-[0_0_15px_#ef4444] w-14 h-14" style="left: 50%; animation-duration: 11s; animation-delay: 5s;"></div>
+            <div class="floating-shape absolute bottom-[-100px] border-2 border-blue-500 shadow-[0_0_15px_#3b82f6] w-24 h-24" style="left: 20%; animation-duration: 18s; animation-delay: 4s;"></div>
+        </div>
+
+        <!-- กล่องใส่ชื่อและปุ่มเริ่มเกม -->
+        <div class="relative z-10 flex flex-col items-center bg-slate-800/80 p-10 rounded-3xl border border-slate-700 shadow-[0_0_40px_rgba(34,211,238,0.15)] backdrop-blur-md text-center">
+            <h1 class="text-5xl md:text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 mb-2" style="filter: drop-shadow(0 0 15px rgba(34,211,238,0.6));">NEON TETRIS</h1>
+            <p class="text-slate-400 mb-8 tracking-widest text-sm">CYBERPUNK EDITION</p>
+            
+            <input type="text" id="player-name-input" placeholder="ENTER YOUR NAME" autocomplete="off" class="w-full max-w-sm mb-6 bg-slate-900/80 border-2 border-slate-600 rounded-lg px-6 py-4 text-center text-cyan-300 text-xl focus:outline-none focus:border-cyan-400 focus:shadow-[0_0_20px_rgba(34,211,238,0.4)] transition-all uppercase tracking-widest placeholder-slate-600">
+            
+            <button onclick="enterGame()" class="neon-button w-full max-w-sm bg-cyan-900/30 text-cyan-400 border-2 border-cyan-400 py-4 rounded-full font-bold text-xl tracking-widest hover:bg-cyan-800/50">
+                ENTER SYSTEM
+            </button>
+        </div>
+    </div>
+
+    <!-- คอนเทนเนอร์เกมหลัก (ซ่อนไว้ก่อน) -->
+    <div id="game-container" class="hidden flex-col md:flex-row gap-8 items-start relative p-8 bg-slate-900/90 backdrop-blur-lg rounded-2xl shadow-[0_0_50px_rgba(34,211,238,0.15)] border border-slate-700/80 z-10">
+        
+        <!-- ส่วนซ้าย: กระดานเกมหลัก -->
+        <div class="relative">
+            <!-- ขนาดกระดาน 10 x 20 (กำหนด block size = 30px -> กว้าง 300px, สูง 600px) -->
+            <canvas id="game-board" width="300" height="600"></canvas>
+            
+            <!-- หน้าจอ Game Over -->
+            <div id="game-over-screen">
+                <h2 class="text-4xl font-bold text-red-500 neon-text mb-4">GAME OVER</h2>
+                <p class="text-lg mb-6">Score: <span id="final-score" class="text-yellow-400 font-bold">0</span></p>
+                <div class="flex gap-4">
+                    <button onclick="startGame()" class="neon-button text-cyan-400 border border-cyan-400 px-6 py-2 rounded-full font-bold text-sm">
+                        PLAY AGAIN
+                    </button>
+                    <button onclick="backToHome()" class="neon-button text-purple-400 border border-purple-400 px-6 py-2 rounded-full font-bold text-sm">
+                        MAIN MENU
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ส่วนขวา: แผงควบคุม (UI Panel) -->
+        <div class="flex flex-col gap-6 w-48">
+            <!-- โลโก้เกม -->
+            <div class="text-center mb-2">
+                <h1 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500" style="filter: drop-shadow(0 0 8px rgba(34,211,238,0.5));">TETRIS</h1>
+                <p id="display-player-name" class="text-sm text-cyan-300 font-bold uppercase tracking-widest mt-2 truncate">GUEST</p>
+            </div>
+
+            <!-- กล่องแสดงบล็อกถัดไป -->
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col items-center">
+                <h3 class="text-sm text-slate-400 mb-2 uppercase tracking-wider">Next Piece</h3>
+                <canvas id="next-piece-board" width="120" height="120"></canvas>
+            </div>
+
+            <!-- กล่องแสดงคะแนนและด่าน -->
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col gap-4">
+                <div>
+                    <h3 class="text-sm text-slate-400 uppercase tracking-wider">Score</h3>
+                    <p id="score-display" class="text-2xl font-bold text-yellow-400 neon-text">0</p>
+                </div>
+                <div>
+                    <h3 class="text-sm text-slate-400 uppercase tracking-wider">Level</h3>
+                    <p id="level-display" class="text-2xl font-bold text-green-400 neon-text">1</p>
+                </div>
+                <div>
+                    <h3 class="text-sm text-slate-400 uppercase tracking-wider">Lines</h3>
+                    <p id="lines-display" class="text-xl font-bold text-white">0</p>
+                </div>
+            </div>
+
+            <!-- ปุ่มควบคุมการเริ่มเกม -->
+            <div class="flex flex-col gap-3 mt-auto">
+                <button id="start-btn" onclick="startGame()" class="neon-button bg-transparent text-cyan-400 border-2 border-cyan-400 py-3 rounded-lg font-bold">
+                    START
+                </button>
+                <button onclick="resetGame()" class="neon-button bg-transparent text-red-400 border border-red-400 py-2 rounded-lg font-bold text-sm">
+                    RESTART
+                </button>
+            </div>
+            
+            <!-- คำแนะนำปุ่มกด -->
+            <div class="text-xs text-slate-500 mt-2">
+                <p>Controls:</p>
+                <p>⬅️ ➡️ : Move</p>
+                <p>⬆️ : Rotate</p>
+                <p>⬇️ : Soft Drop</p>
+                <p>Space : Hard Drop</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- ระบบสร้างลวดลายอนุภาคพื้นหลังเคลื่อนไหว (Animated Background Particles) ---
+        const bgCanvas = document.getElementById('bg-canvas');
+        const bgCtx = bgCanvas.getContext('2d');
+        let bgParticles = [];
+
+        function resizeBgCanvas() {
+            bgCanvas.width = window.innerWidth;
+            bgCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeBgCanvas);
+        resizeBgCanvas();
+
+        class BgParticle {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                this.x = Math.random() * bgCanvas.width;
+                this.y = bgCanvas.height + Math.random() * 100;
+                this.size = Math.random() * 3 + 1;
+                this.speedY = Math.random() * 1.5 + 0.3;
+                this.speedX = (Math.random() - 0.5) * 0.5;
+                this.alpha = Math.random() * 0.6 + 0.2;
+                // สุ่มโทนสีนีออน (Cyan, Purple, Pink, Blue)
+                const colors = ['#22d3ee', '#a855f7', '#ec4899', '#3b82f6'];
+                this.color = colors[Math.floor(Math.random() * colors.length)];
+            }
+
+            update() {
+                this.y -= this.speedY;
+                this.x += this.speedX;
+                if (this.y < -10) {
+                    this.reset();
+                }
+            }
+
+            draw() {
+                bgCtx.save();
+                bgCtx.globalAlpha = this.alpha;
+                bgCtx.fillStyle = this.color;
+                bgCtx.shadowBlur = 10;
+                bgCtx.shadowColor = this.color;
+                bgCtx.beginPath();
+                bgCtx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                bgCtx.fill();
+                bgCtx.restore();
+            }
+        }
+
+        // สร้างฝูงอนุภาค 60 ตัว
+        for (let i = 0; i < 60; i++) {
+            const p = new BgParticle();
+            p.y = Math.random() * bgCanvas.height; // กระจายเต็มจอตอนเริ่มต้น
+            bgParticles.push(p);
+        }
+
+        // วนลูปวาดพื้นหลังอนิเมชันตลอดเวลา
+        function animateBg() {
+            bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+            
+            // วาดเส้นตารางจางๆ แบบมิติ (Grid overlay)
+            bgCtx.strokeStyle = 'rgba(51, 65, 85, 0.15)';
+            bgCtx.lineWidth = 1;
+            const gridSize = 40;
+            for (let x = 0; x < bgCanvas.width; x += gridSize) {
+                bgCtx.beginPath();
+                bgCtx.moveTo(x, 0);
+                bgCtx.lineTo(x, bgCanvas.height);
+                bgCtx.stroke();
+            }
+            for (let y = 0; y < bgCanvas.height; y += gridSize) {
+                bgCtx.beginPath();
+                bgCtx.moveTo(0, y);
+                bgCtx.lineTo(bgCanvas.width, y);
+                bgCtx.stroke();
+            }
+
+            // อัปเดตและวาดอนุภาค
+            bgParticles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            // วาดเส้นเชื่อมต่อระหว่างอนุภาคที่อยู่ใกล้กัน
+            for (let i = 0; i < bgParticles.length; i++) {
+                for (let j = i + 1; j < bgParticles.length; j++) {
+                    const dx = bgParticles[i].x - bgParticles[j].x;
+                    const dy = bgParticles[i].y - bgParticles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < 100) {
+                        bgCtx.save();
+                        bgCtx.globalAlpha = (1 - dist / 100) * 0.15;
+                        bgCtx.strokeStyle = bgParticles[i].color;
+                        bgCtx.lineWidth = 0.8;
+                        bgCtx.beginPath();
+                        bgCtx.moveTo(bgParticles[i].x, bgParticles[i].y);
+                        bgCtx.lineTo(bgParticles[j].x, bgParticles[j].y);
+                        bgCtx.stroke();
+                        bgCtx.restore();
+                    }
+                }
+            }
+
+            requestAnimationFrame(animateBg);
+        }
+        animateBg();
+
+        // --- ระบบหน้าจอเริ่มเกม ---
+        function enterGame() {
+            const nameInput = document.getElementById('player-name-input').value.trim();
+            const playerName = nameInput !== "" ? nameInput : "GUEST";
+            
+            // แสดงชื่อในหน้าเกม
+            document.getElementById('display-player-name').innerText = playerName;
+            
+            // สลับหน้าจอ (ซ่อนหน้า Start, แสดงหน้า Game)
+            const startScreen = document.getElementById('start-screen');
+            const gameContainer = document.getElementById('game-container');
+            
+            startScreen.classList.remove('flex');
+            startScreen.classList.add('hidden');
+            
+            gameContainer.classList.remove('hidden');
+            gameContainer.classList.add('flex');
+        }
+
+        // --- การตั้งค่าพื้นฐานของเกม ---
+        const canvas = document.getElementById('game-board');
+        const ctx = canvas.getContext('2d');
+        const nextCanvas = document.getElementById('next-piece-board');
+        const nextCtx = nextCanvas.getContext('2d');
+
+        const COLS = 10;          // จำนวนคอลัมน์
+        const ROWS = 20;          // จำนวนแถว
+        const BLOCK_SIZE = 30;    // ขนาดของ 1 บล็อก (30 พิกเซล)
+
+        // ข้อมูลรูปร่างของบล็อก (Tetrominoes) ทั้ง 7 แบบ
+        const SHAPES = [
+            [], // 0 เป็นช่องว่าง (ไม่ใช้)
+            [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]], // I
+            [[2, 0, 0], [2, 2, 2], [0, 0, 0]], // J
+            [[0, 0, 3], [3, 3, 3], [0, 0, 0]], // L
+            [[4, 4], [4, 4]], // O
+            [[0, 5, 5], [5, 5, 0], [0, 0, 0]], // S
+            [[0, 6, 0], [6, 6, 6], [0, 0, 0]], // T
+            [[7, 7, 0], [0, 7, 7], [0, 0, 0]]  // Z
+        ];
+
+        // สีของบล็อกแต่ละชนิด (ใช้สำหรับเติมสีและทำเงาเรืองแสง)
+        const COLORS = [
+            'transparent',
+            '#00ffff', // I - Cyan
+            '#2563eb', // J - Blue
+            '#f97316', // L - Orange
+            '#eab308', // O - Yellow
+            '#22c55e', // S - Green
+            '#a855f7', // T - Purple
+            '#ef4444'  // Z - Red
+        ];
+
+        // ตัวแปรสถานะเกม
+        let board = [];
+        let currentPiece = null;
+        let nextPiece = null;
+        let score = 0;
+        let level = 1;
+        let lines = 0;
+        let isGameOver = true;
+        let isPaused = false;
+        let dropInterval = 1000; // ความเร็วเริ่มต้น (มิลลิวินาทีต่อ 1 ช่อง)
+        let dropCounter = 0;
+        let lastTime = 0;
+        let animationId;
+
+        // โครงสร้างออบเจกต์สำหรับบล็อกที่กำลังตกลงมา
+        class Piece {
+            constructor(shapeId) {
+                this.shapeId = shapeId;
+                this.shape = SHAPES[shapeId];
+                this.color = COLORS[shapeId];
+                // จุดเริ่มต้นให้อยู่ตรงกลางด้านบนสุด
+                this.x = Math.floor(COLS / 2) - Math.floor(this.shape[0].length / 2);
+                this.y = 0;
+            }
+        }
+
+        // --- ฟังก์ชันหลักของเกม ---
+
+        // 1. สร้างกระดานว่างๆ (20 แถว 10 คอลัมน์) ที่มีแต่เลข 0
+        function createBoard() {
+            board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+        }
+
+        // 2. สุ่มสร้างบล็อกใหม่ (ค่าตั้งแต่ 1 ถึง 7)
+        function randomPiece() {
+            const shapeId = Math.floor(Math.random() * 7) + 1;
+            return new Piece(shapeId);
+        }
+
+        // 3. เริ่มเกมใหม่ทั้งหมด
+        function startGame() {
+            document.getElementById('game-over-screen').style.display = 'none';
+            document.getElementById('start-btn').innerText = "PAUSE";
+            
+            if (!isGameOver && isPaused) {
+                // ถ้าเกมพาสอยู่ ให้เล่นต่อ
+                isPaused = false;
+                requestAnimationFrame(update);
+                return;
+            }
+            if (!isGameOver && !isPaused) {
+                // ถ้าเกมกำลังเล่นอยู่ แล้วกด Pause
+                isPaused = true;
+                document.getElementById('start-btn').innerText = "RESUME";
+                cancelAnimationFrame(animationId);
+                return;
+            }
+
+            // รีเซ็ตค่าเริ่มต้นทั้งหมด
+            createBoard();
+            score = 0;
+            level = 1;
+            lines = 0;
+            dropInterval = 1000;
+            isGameOver = false;
+            isPaused = false;
+            updateUI();
+            
+            currentPiece = randomPiece();
+            nextPiece = randomPiece();
+            drawNextPiece();
+            
+            lastTime = performance.now();
+            dropCounter = 0;
+            
+            // เริ่ม Game Loop
+            if (animationId) cancelAnimationFrame(animationId);
+            animationId = requestAnimationFrame(update);
+        }
+
+        function resetGame() {
+            isGameOver = true;
+            cancelAnimationFrame(animationId);
+            startGame();
+        }
+
+        // --- ฟังก์ชันกลับหน้าแรก ---
+        function backToHome() {
+            isGameOver = true;
+            cancelAnimationFrame(animationId);
+            
+            // ซ่อนหน้า Game Over และหน้าเกมหลัก
+            document.getElementById('game-over-screen').style.display = 'none';
+            const gameContainer = document.getElementById('game-container');
+            gameContainer.classList.remove('flex');
+            gameContainer.classList.add('hidden');
+            
+            // แสดงหน้า Start Screen
+            const startScreen = document.getElementById('start-screen');
+            startScreen.classList.remove('hidden');
+            startScreen.classList.add('flex');
+            
+            // รีเซ็ตกระดานให้ว่างเปล่า
+            createBoard();
+            draw();
+        }
+
+        function updateUI() {
+            document.getElementById('score-display').innerText = score;
+            document.getElementById('level-display').innerText = level;
+            document.getElementById('lines-display').innerText = lines;
+        }
+
+        // --- ระบบวาดภาพ (Rendering) ---
+
+        // วาดบล็อก 1 ช่องพร้อมเอฟเฟกต์นีออน
+        function drawBlock(ctxTarget, x, y, color) {
+            ctxTarget.fillStyle = color;
+            ctxTarget.shadowBlur = 15;
+            ctxTarget.shadowColor = color;
+            
+            // วาดตัวบล็อก
+            ctxTarget.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+            
+            // วาดขอบด้านในให้ดูมีมิติ
+            ctxTarget.shadowBlur = 0; // ปิดเงาสำหรับขอบ
+            ctxTarget.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctxTarget.lineWidth = 1;
+            ctxTarget.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+            
+            // ทำให้ตรงกลางสว่างขึ้นเล็กน้อย
+            ctxTarget.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctxTarget.fillRect((x * BLOCK_SIZE) + 4, (y * BLOCK_SIZE) + 4, BLOCK_SIZE - 8, BLOCK_SIZE - 8);
+        }
+
+        // วาดกระดานเกมทั้งหมด
+        function draw() {
+            // ล้างหน้าจอ (กระดานหลัก)
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // วาดบล็อกที่ถูกวางลงบนกระดานแล้ว (ค่าในอาร์เรย์ที่ไม่ใช่ 0)
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] !== 0) {
+                        drawBlock(ctx, c, r, COLORS[board[r][c]]);
+                    }
+                }
+            }
+
+            // วาดบล็อกปัจจุบันที่กำลังตกลงมา
+            if (currentPiece) {
+                currentPiece.shape.forEach((row, y) => {
+                    row.forEach((value, x) => {
+                        if (value !== 0) {
+                            drawBlock(ctx, currentPiece.x + x, currentPiece.y + y, currentPiece.color);
+                        }
+                    });
+                });
+            }
+        }
+
+        // วาดบล็อกตัวถัดไปในช่องเล็ก
+        function drawNextPiece() {
+            nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+            // คำนวณเพื่อให้อยู่ตรงกลาง
+            const offsetX = (4 - nextPiece.shape[0].length) / 2;
+            const offsetY = (4 - nextPiece.shape.length) / 2;
+            
+            nextPiece.shape.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        drawBlock(nextCtx, offsetX + x, offsetY + y, nextPiece.color);
+                    }
+                });
+            });
+        }
+
+        // --- ระบบอัปเดตสถานะเกมและการชน (Physics & Logic) ---
+
+        // ตรวจสอบว่าตำแหน่งถัดไปสามารถไปได้หรือไม่ (มีการชนขอบกระดานหรือบล็อกอื่นหรือไม่)
+        function checkCollision(piece, offsetX, offsetY, newShape = piece.shape) {
+            for (let y = 0; y < newShape.length; y++) {
+                for (let x = 0; x < newShape[y].length; x++) {
+                    if (newShape[y][x] !== 0) {
+                        let newX = piece.x + x + offsetX;
+                        let newY = piece.y + y + offsetY;
+
+                        // ชนกำแพงด้านข้างหรือพื้นด้านล่าง
+                        if (newX < 0 || newX >= COLS || newY >= ROWS) {
+                            return true;
+                        }
+                        // ชนบล็อกอื่นบนกระดาน (ไม่เช็คด้านบน newY < 0 เพราะเพิ่งเกิดใหม่)
+                        if (newY >= 0 && board[newY][newX] !== 0) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        // เมื่อบล็อกตกถึงพื้น ให้ฝังข้อมูลบล็อกลงไปในอาร์เรย์ของกระดาน
+        function mergePiece() {
+            currentPiece.shape.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        let boardY = currentPiece.y + y;
+                        let boardX = currentPiece.x + x;
+                        if (boardY >= 0 && boardY < ROWS) {
+                            board[boardY][boardX] = currentPiece.shapeId;
+                        }
+                    }
+                });
+            });
+        }
+
+        // ตรวจสอบและเคลียร์แถวที่เต็ม
+        function clearLines() {
+            let linesCleared = 0;
+
+            for (let r = ROWS - 1; r >= 0; r--) {
+                // ถ้าแถวนั้นไม่มีช่องว่างเลย (ไม่มีเลข 0)
+                if (board[r].every(value => value !== 0)) {
+                    linesCleared++;
+                    // ลบแถวที่เต็มออก
+                    board.splice(r, 1);
+                    // เพิ่มแถวว่างๆ เข้าไปด้านบนสุด
+                    board.unshift(Array(COLS).fill(0));
+                    r++; // เช็คแถวเดิมอีกครั้งเพราะตอนนี้เลื่อนลงมาแล้ว
+                }
+            }
+
+            if (linesCleared > 0) {
+                // คำนวณคะแนนตามจำนวนแถวที่เคลียร์พร้อมกัน
+                const points = [0, 100, 300, 500, 800];
+                score += points[linesCleared] * level;
+                lines += linesCleared;
+
+                // เพิ่มระดับด่านทุกๆ 10 แถว และเร่งความเร็วเกม
+                if (lines >= level * 10) {
+                    level++;
+                    // ลดเวลาหน่วงลง ทำให้ตกลงมาเร็วขึ้น (ต่ำสุดที่ 100ms)
+                    dropInterval = Math.max(100, 1000 - (level - 1) * 100);
+                }
+                updateUI();
+            }
+        }
+
+        // จบเกม
+        function gameOver() {
+            isGameOver = true;
+            cancelAnimationFrame(animationId);
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('game-over-screen').style.display = 'flex';
+            document.getElementById('start-btn').innerText = "START";
+        }
+
+        // ขยับบล็อกลงมา 1 ช่อง
+        function drop() {
+            if (!checkCollision(currentPiece, 0, 1)) {
+                currentPiece.y++;
+            } else {
+                // ถ้าขยับลงไม่ได้ แสดงว่าถึงพื้น หรือชนบล็อกอื่น
+                // ตรวจสอบก่อนว่าถ้าอยู่ที่จุดสูงสุด(เพิ่งเกิด) แปลว่าพื้นที่เต็ม -> Game Over
+                if (currentPiece.y <= 0) {
+                    gameOver();
+                    return;
+                }
+                
+                mergePiece();     // ฝังบล็อกลงกระดาน
+                clearLines();     // เคลียร์แถว
+                
+                // นำบล็อกถัดไปมาใช้ และสุ่มบล็อกใหม่ต่อไป
+                currentPiece = nextPiece;
+                nextPiece = randomPiece();
+                drawNextPiece();
+            }
+            dropCounter = 0;
+        }
+
+        // --- ระบบ Game Loop (วนลูปเพื่ออัปเดตเฟรมเรตและเวลา) ---
+        function update(time = 0) {
+            if (isGameOver || isPaused) return;
+
+            const deltaTime = time - lastTime;
+            lastTime = time;
+            dropCounter += deltaTime;
+
+            // ถ้าระยะเวลาเกินกำหนดที่ตั้งไว้ ให้บล็อกตกลงมา 1 ช่อง
+            if (dropCounter > dropInterval) {
+                drop();
+            }
+
+            draw();
+            animationId = requestAnimationFrame(update);
+        }
+
+        // --- ระบบการควบคุมจากแป้นพิมพ์ (Controls) ---
+        
+        function movePiece(dir) {
+            if (!isGameOver && !isPaused && !checkCollision(currentPiece, dir, 0)) {
+                currentPiece.x += dir;
+                draw();
+            }
+        }
+
+        function rotatePiece() {
+            if (isGameOver || isPaused) return;
+
+            // ลอจิกการหมุนเมทริกซ์ 90 องศาตามเข็มนาฬิกา
+            const shape = currentPiece.shape;
+            const newShape = [];
+            for (let i = 0; i < shape[0].length; i++) {
+                let newRow = [];
+                for (let j = shape.length - 1; j >= 0; j--) {
+                    newRow.push(shape[j][i]);
+                }
+                newShape.push(newRow);
+            }
+
+            // ตรวจสอบว่าหมุนแล้วชนหรือไม่ ถ้าไม่ชนถึงจะยอมให้หมุน
+            if (!checkCollision(currentPiece, 0, 0, newShape)) {
+                currentPiece.shape = newShape;
+                draw();
+            }
+        }
+
+        function hardDrop() {
+            if (isGameOver || isPaused) return;
+            // วนลูปให้ตกลงมาเรื่อยๆ จนกว่าจะชน
+            while (!checkCollision(currentPiece, 0, 1)) {
+                currentPiece.y++;
+                score += 2; // ได้คะแนนพิเศษจากการกด Hard drop
+            }
+            drop(); // ฝังบล็อก
+            updateUI();
+            draw();
+        }
+
+        document.addEventListener('keydown', event => {
+            // ป้องกันหน้าจอเลื่อนเมื่อกดปุ่มลูกศรหรือ Spacebar
+            if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].indexOf(event.code) > -1) {
+                event.preventDefault();
+            }
+
+            switch (event.code) {
+                case 'ArrowLeft':
+                    movePiece(-1);
+                    break;
+                case 'ArrowRight':
+                    movePiece(1);
+                    break;
+                case 'ArrowDown':
+                    // Soft drop
+                    drop();
+                    score += 1;
+                    updateUI();
+                    draw();
+                    break;
+                case 'ArrowUp':
+                    rotatePiece();
+                    break;
+                case 'Space':
+                    hardDrop();
+                    break;
+            }
+        });
+
+        // สร้างกระดานเปล่าและวาดเตรียมไว้เมื่อเปิดหน้าเว็บครั้งแรก
+        createBoard();
+        draw();
+
+    </script>
+</body>
+</html>
